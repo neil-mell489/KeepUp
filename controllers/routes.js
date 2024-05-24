@@ -26,7 +26,10 @@ router.put('/events/:id', eventController.updateEvent);
 // DELETE - Delete an event by ID
 router.delete('/events/:id', eventController.deleteEvent); 
 
+//  sign User Up
 router.post("/auth/signup", userCtrl.signup)
+
+//  log user in
 router.post("/auth/login", userCtrl.login)
 
 router.get("/user/:id", verifyToken, userCtrl.getUser)
