@@ -24,7 +24,6 @@ mongoose.connect(process.env.MONGODB_URI)
 const eventRoutes = require('./controllers/routes.js'); 
 app.use('/api', eventRoutes);
 
-
 // Error Handling Middleware
 app.use((error, req, res, next) => {
   console.error(error.stack);

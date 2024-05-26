@@ -1,83 +1,85 @@
-const { createToken } = require("../middlewares/verifyToken");
-const db = require("../models/newUser");
-const bcrypt = require("bcrypt");
+const User = require('../models/user');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const twilio = require('twilio');
 
-// Debugging
-console.log("db:", db);
-console.log("db.User:", db.User);
-console.log("db.User.find:", db.User.find);
+const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
-const signup = async (req, res) => {
+// User signup
+exports.signup = async (req, res) => {
     try {
-        const { email, username, password } = req.body;
-
-        // Debugging
-        console.log("Request Body:", req.body);
-
-        const query = db.User.find({});
-        query.or([{ username: username }, { email: email }]);
-        const foundUser = await query.exec();
-
-        if (foundUser.length !== 0) {
-            return res.status(400).json({ message: "Username and Email already taken" });
-        }
-
-        const salt = await bcrypt.genSalt(10);
-        const hash = await bcrypt.hash(password, salt);
-
-        req.body.password = hash;
-        const createdUser = await db.User.create(req.body);
-        await createdUser.save();
-
-        return res.status(201).json({ message: "User successfully registered", userId: createdUser.id });
-    } catch (err) {
-        console.log(err);
-        return res.status(500).json({ error: "Internal Server Error", message: err.message });
+        const { username, email, password } = req.body;
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = new User({ username, email, password: hashedPassword });
+        await newUser.save();
+        res.status(201).json({ message: 'User created successfully' });
+    } catch (error) {
+        console.error('Error creating user:', error);
+        res.status(500).json({ error: 'Error creating user' });
     }
 };
 
-const login = async (req, res) => {
+// Confirm user with phone number
+exports.confirm = async (req, res) => {
     try {
-        const { username, password, email } = req.body;
-        const query = db.User.find({});
-        query.and([{ username: username }, { email: email }]);
-
-        const foundUser = await query.exec();
-        if (foundUser.length === 0) {
-            return res.status(400).json({ error: "Invalid Login Credentials" });
-        }
-        const verifyPassword = await bcrypt.compare(password, foundUser[0].password);
-        if (!verifyPassword) {
-            return res.status(400).json({ error: "Invalid Login Credentials" });
+        const { userId, phoneNumber } = req.body;
+        const user = await User.findById(userId);
+        if (!user) {
+            console.error('User not found');
+            return res.status(404).json({ error: 'User not found' });
         }
 
-        const token = createToken(foundUser[0]);
-        return res.status(200).json({ token, id: foundUser[0]._id });
-    } catch (err) {
-        console.log(err);
-        return res.status(500).json({ message: "Internal Server Error", error: err.message });
+        user.phoneNumber = phoneNumber;
+        await user.save();
+
+        const verification = await twilioClient.verify.services(process.env.TWILIO_VERIFY_SERVICE_SID)
+            .verifications
+            .create({ to: phoneNumber, channel: 'sms' });
+
+        res.status(200).json({ message: 'Verification code sent', verification });
+    } catch (error) {
+        console.error('Error confirming phone number:', error);
+        res.status(500).json({ error: 'Error confirming phone number' });
     }
 };
 
-const getUser = async (req, res) => {
+// User login
+exports.login = async (req, res) => {
     try {
-        const id = req.params.id;
-        const query = db.User.findById(id);
-        query.select("-password");
-        const foundUser = await query.exec();
-        console.log(foundUser);
-        if (!foundUser) {
-            return res.status(400).json({ error: "User is not found" });
+        const { email, password } = req.body;
+        const user = await User.findOne({ email });
+        if (!user) {
+            console.error('User not found');
+            return res.status(404).json({ error: 'User not found' });
         }
-        return res.status(200).json({ message: "Successfully found user", data: foundUser });
-    } catch (err) {
-        console.log(err);
-        return res.status(500).json({ error: "Internal Server Error" });
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            console.error('Invalid credentials');
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
+
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        console.log('Generated Token:', token); // Log the generated token
+        res.status(200).json({ token });
+    } catch (error) {
+        console.error('Error logging in:', error);
+        res.status(500).json({ error: 'Error logging in' });
     }
 };
 
-module.exports = {
-    signup,
-    login,
-    getUser
+// Get user by ID
+exports.getUser = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            console.error('User not found');
+            return res.status(404).json({ error: 'User not found' });
+        }
+        console.log('Retrieved User:', user); // Log the retrieved user
+        res.status(200).json(user);
+    } catch (error) {
+        console.error('Error fetching user:', error);
+        res.status(500).json({ error: 'Error fetching user' });
+    }
 };
